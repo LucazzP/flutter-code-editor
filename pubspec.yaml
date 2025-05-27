@@ -11,7 +11,7 @@ dependencies:
   autotrie:
     git:
       url: https://github.com/LucazzP/autotrie.git
-      ref: 1619c18        
+      ref: 1619c18
   characters: ^1.4.0
   charcode: ^1.4.0
   collection: ^1.17.2

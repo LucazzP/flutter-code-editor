@@ -378,7 +378,8 @@ class _CodeFieldState extends State<CodeField> {
       ),
     );
 
-    return SingleChildScrollView(
+    return widget.wrap ? intrinsic : 
+    SingleChildScrollView(
       padding: EdgeInsets.only(
         right: widget.padding.right,
       ),
@@ -455,6 +456,7 @@ class _CodeFieldState extends State<CodeField> {
         decoration: widget.decoration,
         color: _backgroundCol,
         key: _codeFieldKey,
+        clipBehavior: Clip.antiAlias,
         padding: const EdgeInsets.only(left: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -537,7 +539,7 @@ class _CodeFieldState extends State<CodeField> {
     return max(
       _getCaretOffset(textPainter).dx +
           widget.padding.left -
-          _horizontalCodeScroll!.offset +
+          // (_horizontalCodeScroll?.offset ?? 0) +
           (_editorOffset?.dx ?? 0),
       0,
     );
@@ -606,6 +608,7 @@ class _CodeFieldState extends State<CodeField> {
               ),
             ),
             child: Material(
+              color: _backgroundCol,
               child: SearchWidget(
                 searchController: widget.controller.searchController,
               ),
