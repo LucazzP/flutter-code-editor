@@ -386,15 +386,15 @@ class CodeController extends TextEditingController {
   void insertSelectedWord() {
     final previousSelection = selection;
     final selectedWord = popupController.getSelectedWord();
-    final startPosition = value.wordAtCursorStart;
     final currentWord = value.wordAtCursor;
+    final startPosition = value.wordAtCursorStart ?? previousSelection.start;
 
-    if (startPosition == null || currentWord == null) {
+    if (!previousSelection.isCollapsed || startPosition < 0) {
       popupController.hide();
       return;
     }
 
-    final endReplacingPosition = startPosition + currentWord.length;
+    final endReplacingPosition = startPosition + (currentWord?.length ?? 0);
     final endSelectionPosition = startPosition + selectedWord.length;
 
     var additionalSpaceIfEnd = '';

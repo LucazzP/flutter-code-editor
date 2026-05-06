@@ -88,6 +88,81 @@ void main() {
       focusNode.dispose();
     });
 
+    testWidgets('applies selected suggestion on Enter after Ctrl+Space',
+        (WidgetTester wt) async {
+      final controller = createController('wid');
+      final focusNode = FocusNode();
+      controller.autocompleter.setCustomWords(['widgetBuilder']);
+
+      await wt.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CodeField(
+              controller: controller,
+              focusNode: focusNode,
+              decoration: const BoxDecoration(),
+            ),
+          ),
+        ),
+      );
+      focusNode.requestFocus();
+      controller.setCursor(0);
+      await wt.pump();
+
+      await wt.sendKeyDownEvent(LogicalKeyboardKey.control);
+      await wt.sendKeyEvent(LogicalKeyboardKey.space);
+      await wt.sendKeyUpEvent(LogicalKeyboardKey.control);
+      await wt.pump();
+      await wt.pump();
+
+      await wt.sendKeyEvent(LogicalKeyboardKey.enter);
+      await wt.pump();
+
+      expect(controller.text, 'widgetBuilder ');
+      expect(find.byType(Popup), findsNothing);
+
+      await wt.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      focusNode.dispose();
+    });
+
+    testWidgets('applies suggestion on single click', (WidgetTester wt) async {
+      final controller = createController('wid');
+      final focusNode = FocusNode();
+      controller.autocompleter.setCustomWords(['widgetBuilder']);
+
+      await wt.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CodeField(
+              controller: controller,
+              focusNode: focusNode,
+              decoration: const BoxDecoration(),
+            ),
+          ),
+        ),
+      );
+      focusNode.requestFocus();
+      controller.setCursor(0);
+      await wt.pump();
+
+      await wt.sendKeyDownEvent(LogicalKeyboardKey.control);
+      await wt.sendKeyEvent(LogicalKeyboardKey.space);
+      await wt.sendKeyUpEvent(LogicalKeyboardKey.control);
+      await wt.pump();
+      await wt.pump();
+
+      await wt.tap(find.text('widgetBuilder'));
+      await wt.pump();
+
+      expect(controller.text, 'widgetBuilder ');
+      expect(find.byType(Popup), findsNothing);
+
+      await wt.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      focusNode.dispose();
+    });
+
     testWidgets('keeps popup open when arrowing past fourth suggestion',
         (WidgetTester wt) async {
       final controller = createController('wo');
