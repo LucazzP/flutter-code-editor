@@ -11,7 +11,8 @@ class PopupController extends ChangeNotifier {
   final ItemPositionsListener itemPositionsListener =
       ItemPositionsListener.create();
 
-  /// Should be called when an active list item is selected to be inserted into the text
+  /// Should be called when an active list item is selected to be inserted
+  /// into the text.
   late final void Function() onCompletionSelected;
 
   PopupController({required this.onCompletionSelected}) : super();
@@ -31,12 +32,8 @@ class PopupController extends ChangeNotifier {
     this.suggestions = suggestions;
     _selectedIndex = 0;
     shouldShow = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (itemScrollController.isAttached) {
-        itemScrollController.jumpTo(index: 0);
-      }
-    });
     notifyListeners();
+    _jumpToWhenReady(index: 0);
   }
 
   void hide() {
@@ -44,14 +41,14 @@ class PopupController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Changes the selected item and scrolls through the list of completions on keyboard arrows pressed
+  /// Changes the selected item and scrolls through the list of completions
+  /// on keyboard arrows pressed.
   void scrollByArrow(ScrollDirection direction) {
-    final previousSelectedIndex = selectedIndex;
     if (direction == ScrollDirection.up) {
-      selectedIndex =
+      _selectedIndex =
           (selectedIndex - 1 + suggestions.length) % suggestions.length;
     } else {
-      selectedIndex = (selectedIndex + 1) % suggestions.length;
+      _selectedIndex = (selectedIndex + 1) % suggestions.length;
     }
     final visiblePositions = itemPositionsListener.itemPositions.value
         .where((item) {
@@ -62,21 +59,80 @@ class PopupController extends ChangeNotifier {
         .map((e) => e.index)
         .toList();
 
-    // List offset will be changed only if new selected item is not visible
-    if (!visiblePositions.contains(selectedIndex)) {
-      // If previously selected item was at the bottom of the visible part of the list,
-      // on 'down' arrow the new one will appear at the bottom as well
-      final isStepDown = selectedIndex - previousSelectedIndex == 1;
-      if (isStepDown && selectedIndex < suggestions.length - 1) {
-        itemScrollController.jumpTo(index: selectedIndex + 1, alignment: 1);
-      } else {
-        itemScrollController.jumpTo(index: selectedIndex);
+    int? targetIndex;
+
+    if (visiblePositions.isEmpty) {
+      targetIndex = selectedIndex;
+    } else {
+      visiblePositions.sort();
+      final firstVisibleIndex = visiblePositions.first;
+      final lastVisibleIndex = visiblePositions.last;
+
+      if (selectedIndex < firstVisibleIndex) {
+        targetIndex = selectedIndex;
+      } else if (selectedIndex > lastVisibleIndex) {
+        final visibleCount = visiblePositions.length;
+        targetIndex =
+            (selectedIndex - visibleCount + 1).clamp(0, suggestions.length - 1);
       }
     }
+
     notifyListeners();
+    if (targetIndex != null) {
+      _jumpToWhenReady(index: targetIndex);
+    }
+  }
+
+  void _jumpToWhenReady({
+    required int index,
+    double alignment = 0,
+    int remainingAttempts = 3,
+  }) {
+    if (_tryJumpTo(index: index, alignment: alignment)) {
+      return;
+    }
+
+    if (remainingAttempts <= 0) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!enabled) {
+        return;
+      }
+      _jumpToWhenReady(
+        index: index,
+        alignment: alignment,
+        remainingAttempts: remainingAttempts - 1,
+      );
+    });
+  }
+
+  bool _tryJumpTo({required int index, double alignment = 0}) {
+    if (!itemScrollController.isAttached) {
+      return false;
+    }
+
+    try {
+      itemScrollController.jumpTo(index: index, alignment: alignment);
+      return true;
+    } on TypeError {
+      return false;
+    }
   }
 
   String getSelectedWord() => suggestions[selectedIndex];
+
+  @override
+  void dispose() {
+    enabled = false;
+    shouldShow = false;
+    final itemPositions = itemPositionsListener.itemPositions;
+    if (itemPositions is ChangeNotifier) {
+      (itemPositions as ChangeNotifier).dispose();
+    }
+    super.dispose();
+  }
 }
 
 /// Possible directions of completions list navigation

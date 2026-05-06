@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:linked_scroll_controller/linked_scroll_controller.dart';
@@ -118,6 +116,10 @@ final _shortcuts = <ShortcutActivator, Intent>{
   ): const TabKeyIntent(),
 };
 
+const _searchPopupPadding = 10.0;
+const _searchPopupMinWidth = 320.0;
+const _searchPopupMinHeight = 70.0;
+
 class CodeField extends StatefulWidget {
   /// {@macro flutter.widgets.textField.minLines}
   final int? minLines;
@@ -224,6 +226,7 @@ class _CodeFieldState extends State<CodeField> {
   ScrollController? _codeScroll;
   ScrollController? _horizontalCodeScroll;
   final _codeFieldKey = GlobalKey();
+  final _textFieldKey = GlobalKey();
 
   OverlayEntry? _suggestionsPopup;
   OverlayEntry? _searchPopup;
@@ -241,6 +244,7 @@ class _CodeFieldState extends State<CodeField> {
 
   final _editorKey = GlobalKey();
   Offset? _editorOffset;
+  bool _overlayGeometryUpdateScheduled = false;
 
   @override
   void initState() {
@@ -250,12 +254,14 @@ class _CodeFieldState extends State<CodeField> {
     _codeScroll = _controllers?.addAndGet();
 
     widget.controller.addListener(_onTextChanged);
-    widget.controller.addListener(_updatePopupOffset);
+    widget.controller.addListener(_scheduleOverlayGeometryUpdate);
     widget.controller.popupController.addListener(_onPopupStateChanged);
     widget.controller.searchController.addListener(
       _onSearchControllerChange,
     );
-    _horizontalCodeScroll = ScrollController();
+    _codeScroll?.addListener(_scheduleOverlayGeometryUpdate);
+    _horizontalCodeScroll = ScrollController()
+      ..addListener(_scheduleOverlayGeometryUpdate);
     _focusNode = widget.focusNode ?? FocusNode();
     _focusNode!.attach(context, onKeyEvent: _onKeyEvent);
 
@@ -266,12 +272,7 @@ class _CodeFieldState extends State<CodeField> {
     disableSpellCheckIfWeb();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      final double width = _codeFieldKey.currentContext!.size!.width;
-      final double height = _codeFieldKey.currentContext!.size!.height;
-      windowSize = Size(width, height);
+      _scheduleOverlayGeometryUpdate();
     });
     _onTextChanged();
   }
@@ -284,17 +285,23 @@ class _CodeFieldState extends State<CodeField> {
   void dispose() {
     widget.controller.searchController.codeFieldFocusNode = null;
     widget.controller.removeListener(_onTextChanged);
-    widget.controller.removeListener(_updatePopupOffset);
+    widget.controller.removeListener(_scheduleOverlayGeometryUpdate);
     widget.controller.popupController.removeListener(_onPopupStateChanged);
-    _suggestionsPopup?.remove();
+    _disposeOverlayEntry(_suggestionsPopup);
+    _suggestionsPopup = null;
     widget.controller.searchController.removeListener(
       _onSearchControllerChange,
     );
-    _searchPopup?.remove();
+    _disposeOverlayEntry(_searchPopup);
     _searchPopup = null;
+    _codeScroll?.removeListener(_scheduleOverlayGeometryUpdate);
+    _horizontalCodeScroll?.removeListener(_scheduleOverlayGeometryUpdate);
     _numberScroll?.dispose();
     _codeScroll?.dispose();
     _horizontalCodeScroll?.dispose();
+    if (widget.focusNode == null) {
+      _focusNode?.dispose();
+    }
     super.dispose();
   }
 
@@ -302,7 +309,7 @@ class _CodeFieldState extends State<CodeField> {
   void didUpdateWidget(covariant CodeField oldWidget) {
     super.didUpdateWidget(oldWidget);
     oldWidget.controller.removeListener(_onTextChanged);
-    oldWidget.controller.removeListener(_updatePopupOffset);
+    oldWidget.controller.removeListener(_scheduleOverlayGeometryUpdate);
     oldWidget.controller.popupController.removeListener(_onPopupStateChanged);
     oldWidget.controller.searchController.removeListener(
       _onSearchControllerChange,
@@ -310,7 +317,7 @@ class _CodeFieldState extends State<CodeField> {
 
     widget.controller.searchController.codeFieldFocusNode = _focusNode;
     widget.controller.addListener(_onTextChanged);
-    widget.controller.addListener(_updatePopupOffset);
+    widget.controller.addListener(_scheduleOverlayGeometryUpdate);
     widget.controller.popupController.addListener(_onPopupStateChanged);
     widget.controller.searchController.addListener(
       _onSearchControllerChange,
@@ -318,21 +325,7 @@ class _CodeFieldState extends State<CodeField> {
   }
 
   void rebuild() {
-    setState(() {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-        // For some reason _codeFieldKey.currentContext is null in tests
-        // so check first.
-        final context = _codeFieldKey.currentContext;
-        if (context != null) {
-          final double width = context.size!.width;
-          final double height = context.size!.height;
-          windowSize = Size(width, height);
-        }
-      });
-    });
+    setState(_scheduleOverlayGeometryUpdate);
   }
 
   void _onTextChanged() {
@@ -349,16 +342,6 @@ class _CodeFieldState extends State<CodeField> {
     widget.controller.text.split('\n').forEach((line) {
       if (line.length > longestLine.length) longestLine = line;
     });
-
-    if (_codeScroll != null && _editorKey.currentContext != null) {
-      final box = _editorKey.currentContext!.findRenderObject() as RenderBox?;
-      _editorOffset = box?.localToGlobal(Offset.zero);
-      if (_editorOffset != null) {
-        var fixedOffset = _editorOffset!;
-        fixedOffset += Offset(0, _codeScroll!.offset);
-        _editorOffset = fixedOffset;
-      }
-    }
 
     rebuild();
   }
@@ -389,15 +372,16 @@ class _CodeFieldState extends State<CodeField> {
       ),
     );
 
-    return widget.wrap ? intrinsic : 
-    SingleChildScrollView(
-      padding: EdgeInsets.only(
-        right: widget.padding.right,
-      ),
-      scrollDirection: Axis.horizontal,
-      controller: _horizontalCodeScroll,
-      child: intrinsic,
-    );
+    return widget.wrap
+        ? intrinsic
+        : SingleChildScrollView(
+            padding: EdgeInsets.only(
+              right: widget.padding.right,
+            ),
+            scrollDirection: Axis.horizontal,
+            controller: _horizontalCodeScroll,
+            child: intrinsic,
+          );
   }
 
   @override
@@ -424,6 +408,7 @@ class _CodeFieldState extends State<CodeField> {
     textStyle = defaultTextStyle.merge(widget.textStyle);
 
     final codeField = TextField(
+      key: _textFieldKey,
       focusNode: _focusNode,
       scrollPadding: widget.padding,
       style: textStyle,
@@ -512,70 +497,114 @@ class _CodeFieldState extends State<CodeField> {
     );
   }
 
-  void _updatePopupOffset() {
-    final textPainter = _getTextPainter(widget.controller.text);
-    final caretHeight = _getCaretHeight(textPainter);
+  void _scheduleOverlayGeometryUpdate() {
+    if (_overlayGeometryUpdateScheduled) {
+      return;
+    }
 
-    final leftOffset = _getPopupLeftOffset(textPainter);
-    final normalTopOffset = _getPopupTopOffset(textPainter, caretHeight);
-    final flippedTopOffset = normalTopOffset -
-        (Sizes.autocompletePopupMaxHeight + caretHeight + Sizes.caretPadding);
+    _overlayGeometryUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _overlayGeometryUpdateScheduled = false;
+      if (!mounted) {
+        return;
+      }
 
-    setState(() {
-      _normalPopupOffset = Offset(leftOffset, normalTopOffset);
-      _flippedPopupOffset = Offset(leftOffset, flippedTopOffset);
+      _updateOverlayGeometry();
+      if (_suggestionsPopup != null ||
+          widget.controller.popupController.shouldShow) {
+        _onPopupStateChanged();
+      }
+      if (_searchPopup != null ||
+          widget.controller.searchController.shouldShow) {
+        _onSearchControllerChange();
+      }
     });
   }
 
-  TextPainter _getTextPainter(String text) {
-    return TextPainter(
-      textDirection: TextDirection.ltr,
-      text: TextSpan(text: text, style: textStyle),
-    )..layout();
+  void _updateOverlayGeometry() {
+    final overlay = Overlay.maybeOf(context);
+    final overlayBox = overlay?.context.findRenderObject() as RenderBox?;
+    final editorBox =
+        _editorKey.currentContext?.findRenderObject() as RenderBox?;
+
+    Size? nextWindowSize = windowSize;
+    Offset? nextEditorOffset = _editorOffset;
+
+    if (overlayBox != null && editorBox != null && editorBox.hasSize) {
+      nextWindowSize = editorBox.size;
+      nextEditorOffset = editorBox.localToGlobal(
+        Offset.zero,
+        ancestor: overlayBox,
+      );
+    }
+
+    Offset nextNormalOffset = _normalPopupOffset;
+    Offset nextFlippedOffset = _flippedPopupOffset;
+    final textFieldState = _textFieldKey.currentState;
+    final editableTextState = _getEditableTextState(textFieldState);
+    final renderEditable = editableTextState?.renderEditable;
+    final selection = widget.controller.selection;
+
+    if (overlayBox != null &&
+        renderEditable != null &&
+        renderEditable.hasSize &&
+        selection.isValid) {
+      final caretRect = renderEditable.getLocalRectForCaret(selection.extent);
+      final caretTopLeft = renderEditable.localToGlobal(
+        caretRect.topLeft,
+        ancestor: overlayBox,
+      );
+      final caretBottomLeft = renderEditable.localToGlobal(
+        caretRect.bottomLeft,
+        ancestor: overlayBox,
+      );
+
+      nextNormalOffset = caretBottomLeft.translate(
+        0,
+        Sizes.caretPadding.toDouble(),
+      );
+      const popupHeight = Sizes.autocompletePopupMaxHeight;
+      final caretPadding = Sizes.caretPadding.toDouble();
+      nextFlippedOffset = caretTopLeft.translate(
+        0,
+        -(popupHeight + caretPadding),
+      );
+    }
+
+    final shouldUpdate = nextWindowSize != windowSize ||
+        nextEditorOffset != _editorOffset ||
+        nextNormalOffset != _normalPopupOffset ||
+        nextFlippedOffset != _flippedPopupOffset;
+
+    if (!shouldUpdate) {
+      return;
+    }
+
+    setState(() {
+      windowSize = nextWindowSize;
+      _editorOffset = nextEditorOffset;
+      _normalPopupOffset = nextNormalOffset;
+      _flippedPopupOffset = nextFlippedOffset;
+    });
   }
 
-  Offset _getCaretOffset(TextPainter textPainter) {
-    return textPainter.getOffsetForCaret(
-      widget.controller.selection.base,
-      Rect.zero,
-    );
-  }
+  EditableTextState? _getEditableTextState(State? textFieldState) {
+    if (textFieldState == null) {
+      return null;
+    }
 
-  double _getCaretHeight(TextPainter textPainter) {
-    final double? caretFullHeight = textPainter.getFullHeightForCaret(
-      widget.controller.selection.base,
-      Rect.zero,
-    );
-    return caretFullHeight ?? 0;
-  }
-
-  double _getPopupLeftOffset(TextPainter textPainter) {
-    return max(
-      _getCaretOffset(textPainter).dx +
-          widget.padding.left -
-          // (_horizontalCodeScroll?.offset ?? 0) +
-          (_editorOffset?.dx ?? 0),
-      0,
-    );
-  }
-
-  double _getPopupTopOffset(TextPainter textPainter, double caretHeight) {
-    return max(
-      _getCaretOffset(textPainter).dy +
-          caretHeight +
-          16 +
-          widget.padding.top -
-          _codeScroll!.offset +
-          (_editorOffset?.dy ?? 0),
-      0,
-    );
+    // `editableTextKey` is only exposed on the private TextField state type.
+    // ignore: avoid_dynamic_calls
+    final editableTextKey = (textFieldState as dynamic).editableTextKey
+        as GlobalKey<EditableTextState>;
+    return editableTextKey.currentState;
   }
 
   void _onPopupStateChanged() {
     final shouldShow =
         widget.controller.popupController.shouldShow && windowSize != null;
     if (!shouldShow) {
-      _suggestionsPopup?.remove();
+      _disposeOverlayEntry(_suggestionsPopup);
       _suggestionsPopup = null;
       return;
     }
@@ -592,45 +621,99 @@ class _CodeFieldState extends State<CodeField> {
     final shouldShow = widget.controller.searchController.shouldShow;
 
     if (!shouldShow) {
-      _searchPopup?.remove();
+      _disposeOverlayEntry(_searchPopup);
       _searchPopup = null;
       return;
     }
+
+    _updateOverlayGeometry();
 
     if (_searchPopup == null) {
       _searchPopup = _buildSearchOverlay();
       Overlay.of(context).insert(_searchPopup!);
     }
+
+    _searchPopup!.markNeedsBuild();
   }
 
   OverlayEntry _buildSearchOverlay() {
     final colorScheme = Theme.of(context).colorScheme;
-    final borderColor = _getTextColorFromTheme() ?? colorScheme.onBackground;
+    final borderColor = _getTextColorFromTheme() ?? colorScheme.onSurface;
     return OverlayEntry(
       builder: (context) {
-        return Positioned(
-          bottom: 10,
-          right: 10,
-          child: Container(
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: borderColor,
-              ),
-              borderRadius: const BorderRadius.all(
-                Radius.circular(5),
-              ),
+        final searchPopup = Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: borderColor,
             ),
-            child: Material(
-              color: _backgroundCol,
-              child: SearchWidget(
-                searchController: widget.controller.searchController,
-              ),
+            borderRadius: const BorderRadius.all(
+              Radius.circular(5),
+            ),
+          ),
+          child: Material(
+            color: _backgroundCol,
+            child: SearchWidget(
+              searchController: widget.controller.searchController,
             ),
           ),
         );
+
+        final codeFieldRect = _getCodeFieldRectInOverlay();
+        final canPositionInsideEditor = codeFieldRect != null &&
+            codeFieldRect.width >= _searchPopupMinWidth &&
+            codeFieldRect.height >= _searchPopupMinHeight;
+
+        if (canPositionInsideEditor) {
+          return Positioned(
+            left: codeFieldRect.left,
+            top: codeFieldRect.top,
+            width: codeFieldRect.width,
+            height: codeFieldRect.height,
+            child: Padding(
+              padding: const EdgeInsets.all(_searchPopupPadding),
+              child: Align(
+                alignment: Alignment.bottomRight,
+                child: searchPopup,
+              ),
+            ),
+          );
+        }
+
+        return Positioned(
+          bottom: _searchPopupPadding,
+          right: _searchPopupPadding,
+          child: searchPopup,
+        );
       },
     );
+  }
+
+  Rect? _getCodeFieldRectInOverlay() {
+    final overlay = Overlay.maybeOf(context);
+    final overlayBox = overlay?.context.findRenderObject() as RenderBox?;
+    final codeFieldBox =
+        _codeFieldKey.currentContext?.findRenderObject() as RenderBox?;
+
+    if (overlayBox == null || codeFieldBox == null || !codeFieldBox.hasSize) {
+      return null;
+    }
+
+    final offset = codeFieldBox.localToGlobal(
+      Offset.zero,
+      ancestor: overlayBox,
+    );
+    return offset & codeFieldBox.size;
+  }
+
+  void _disposeOverlayEntry(OverlayEntry? entry) {
+    if (entry == null) {
+      return;
+    }
+    if (entry.mounted) {
+      entry.remove();
+    }
+    entry.dispose();
   }
 
   Color? _getTextColorFromTheme() {

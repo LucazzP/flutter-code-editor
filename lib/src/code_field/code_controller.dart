@@ -59,6 +59,7 @@ class CodeController extends TextEditingController {
       return;
     }
 
+    _analyzer.dispose();
     _analyzer = analyzer;
     unawaited(analyzeCode());
   }
@@ -327,6 +328,11 @@ class CodeController extends TextEditingController {
   KeyEventResult _onKeyDownRepeat(KeyEvent event) {
     if (event.isCtrlF(HardwareKeyboard.instance.logicalKeysPressed)) {
       showSearch();
+      return KeyEventResult.handled;
+    }
+
+    if (event.isCtrlSpace(HardwareKeyboard.instance.logicalKeysPressed)) {
+      unawaited(generateSuggestions(allowEmptyPrefix: true));
       return KeyEventResult.handled;
     }
 
@@ -812,8 +818,9 @@ class CodeController extends TextEditingController {
     return text;
   }
 
-  Future<void> generateSuggestions() async {
-    final prefix = value.wordToCursor;
+  Future<void> generateSuggestions({bool allowEmptyPrefix = false}) async {
+    final prefix = value.wordToCursor ??
+        (allowEmptyPrefix ? value.wordAtCursor ?? '' : null);
     if (prefix == null) {
       popupController.hide();
       return;
@@ -979,6 +986,10 @@ class CodeController extends TextEditingController {
   void dispose() {
     _disposed = true;
     _debounce?.cancel();
+    _searchSettingsController.removeListener(_updateSearchResult);
+    searchController.removeListener(_updateSearchResult);
+    popupController.dispose();
+    _analyzer.dispose();
     historyController.dispose();
     searchController.dispose();
 

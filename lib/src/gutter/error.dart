@@ -30,6 +30,12 @@ class _GutterErrorWidgetState extends State<GutterErrorWidget> {
   bool _mouseEnteredPopup = false;
 
   @override
+  void dispose() {
+    _disposeEntry();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (event) {
@@ -49,10 +55,12 @@ class _GutterErrorWidgetState extends State<GutterErrorWidget> {
         Future.delayed(
           const Duration(milliseconds: 50),
           () {
+            if (!mounted) {
+              return;
+            }
             setState(() {
               if (!_mouseEnteredPopup) {
-                _entry?.remove();
-                _entry = null;
+                _disposeEntry();
               }
             });
           },
@@ -84,8 +92,7 @@ class _GutterErrorWidgetState extends State<GutterErrorWidget> {
             }),
             onExit: (event) => setState(() {
               _mouseEnteredPopup = false;
-              _entry?.remove();
-              _entry = null;
+              _disposeEntry();
             }),
             child: DefaultTextStyle(
               style: style,
@@ -137,5 +144,16 @@ class _GutterErrorWidgetState extends State<GutterErrorWidget> {
         );
       },
     );
+  }
+
+  void _disposeEntry() {
+    if (_entry == null) {
+      return;
+    }
+    if (_entry!.mounted) {
+      _entry!.remove();
+    }
+    _entry!.dispose();
+    _entry = null;
   }
 }

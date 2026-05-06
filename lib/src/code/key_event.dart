@@ -15,4 +15,17 @@ extension KeyEventExtension on KeyEvent {
 
     return isMetaOrControlPressed;
   }
+
+  bool isCtrlSpace(Set<LogicalKeyboardKey> logicalKeysPressed) {
+    if (physicalKey != PhysicalKeyboardKey.space ||
+        logicalKey != LogicalKeyboardKey.space) {
+      return false;
+    }
+
+    final isControlPressed =
+        logicalKeysPressed.contains(LogicalKeyboardKey.controlLeft) ||
+            logicalKeysPressed.contains(LogicalKeyboardKey.controlRight);
+
+    return isControlPressed;
+  }
 }

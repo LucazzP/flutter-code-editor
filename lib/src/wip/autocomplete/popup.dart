@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
@@ -60,21 +62,21 @@ class PopupState extends State<Popup> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final verticalFlipRequired = _isVerticalFlipRequired();
     final bool isHorizontalOverflowed = _isHorizontallyOverflowed();
-    final double leftOffsetLimit =
-        // TODO(nausharipov): find where 100 comes from
-        widget.editingWindowSize.width -
-            Sizes.autocompletePopupMaxWidth +
-            (widget.editorOffset?.dx ?? 0) -
-            100;
-
-    // Fixes assertion error when ISC isn't attached but _attach method
-    // of ISC instance are being called
-    ItemScrollController? isc;
-    if (widget.controller.itemScrollController.isAttached) {
-      isc = widget.controller.itemScrollController;
-    }
+    final double leftOffsetLimit = max(
+      widget.editorOffset?.dx ?? 0,
+      (widget.editorOffset?.dx ?? 0) +
+          widget.editingWindowSize.width -
+          Sizes.autocompletePopupMaxWidth,
+    );
+    final popupBackgroundColor =
+        (widget.backgroundColor ?? theme.colorScheme.surface).withValues(
+      alpha: 0.96,
+    );
+    final hoverColor = theme.colorScheme.onSurface.withValues(alpha: 0.08);
+    final selectedColor = theme.colorScheme.primary.withValues(alpha: 0.22);
 
     return PageStorage(
       bucket: pageStorageBucket,
@@ -96,7 +98,7 @@ class PopupState extends State<Popup> {
           // ignore: use_decorated_box
           child: Container(
             decoration: BoxDecoration(
-              color: widget.backgroundColor,
+              color: popupBackgroundColor,
               border: Border.all(
                 color: widget.style.color!,
                 width: 0.5,
@@ -105,11 +107,16 @@ class PopupState extends State<Popup> {
             child: ScrollablePositionedList.builder(
               shrinkWrap: true,
               physics: const ClampingScrollPhysics(),
-              itemScrollController: isc,
+              itemScrollController: widget.controller.itemScrollController,
               itemPositionsListener: widget.controller.itemPositionsListener,
               itemCount: widget.controller.suggestions.length,
               itemBuilder: (context, index) {
-                return _buildListItem(index);
+                return _buildListItem(
+                  index,
+                  backgroundColor: popupBackgroundColor,
+                  hoverColor: hoverColor,
+                  selectedColor: selectedColor,
+                );
               },
             ),
           ),
@@ -136,9 +143,14 @@ class PopupState extends State<Popup> {
         widget.editingWindowSize.width;
   }
 
-  Widget _buildListItem(int index) {
+  Widget _buildListItem(
+    int index, {
+    required Color backgroundColor,
+    required Color hoverColor,
+    required Color selectedColor,
+  }) {
     return Material(
-      color: Colors.grey.withOpacity(0.1),
+      color: backgroundColor,
       child: InkWell(
         onTap: () {
           widget.controller.selectedIndex = index;
@@ -149,12 +161,12 @@ class PopupState extends State<Popup> {
           widget.parentFocusNode.requestFocus();
           widget.controller.onCompletionSelected();
         },
-        hoverColor: Colors.grey.withOpacity(0.1),
+        hoverColor: hoverColor,
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
         child: ColoredBox(
           color: widget.controller.selectedIndex == index
-              ? Colors.blueAccent.withOpacity(0.5)
+              ? selectedColor
               : Colors.transparent,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
